@@ -529,7 +529,7 @@ jbApp.directive('acoSimulator', function(){
 			self.options = Object.assign({
 				nodes: 25,
 				// link_density: 0.05,
-				link_per_node: 1,
+				link_per_node: 2,
 				ant_speed: 20,
 				ant_generation: 3000,
 				ant_epsilon: 0.8,
@@ -558,6 +558,7 @@ jbApp.directive('acoSimulator', function(){
 
 			self.best_path = undefined;
 			self.converged_at = undefined;
+			self.onConverge = undefined;
 
 			// Init UI stuff
 			var viewport = $('.viewport', $element);
@@ -798,7 +799,10 @@ jbApp.directive('acoSimulator', function(){
 					var path_length = self.srcNode.highlightBestPath(self.dstNode);
 					if (path_length){
 						self.best_path = path_length;
-						if (!self.converged_at) self.converged_at = self.timestep;	// This works only when we set srcNode and dstNode in the first reset
+						if (!self.converged_at){
+							self.converged_at = self.timestep;	// This works only when we set srcNode and dstNode in the first reset
+							(self.onConverge && self.onConverge(self.converged_at))
+						}
 					}
 					else {
 						self.best_path = undefined;
@@ -858,10 +862,41 @@ jbApp.directive('acoSimulator', function(){
 				nextFrame();
 			}
 
+			function autoNext(count){
+				if (count <= 0) return Promise.resolve([]);
+				return new Promise(function(resolve, reject){
+						self.reset();
+						self.onConverge = function(timestep){
+							self.pause();
+							resolve([timestep]);
+							// setTimeout(function(){
+							// 	resolve([timestep]);
+							// }, 1000);
+						}
+						self.resume();
+					}).then(function(result){
+						return autoNext(count - 1)
+							.then(function(future_result){
+								return result.concat(future_result);
+							})
+					})
+			}
+
+			self.autoRun = function(count){
+				autoNext(count)
+					.then(function(results){
+						alert(results.join(', '));
+					})
+			}
+
 			// Begin animation
 			self.reset();
 			self.editNet();
 			// self.resume();
+
+			// self.autoRun(5).then(function(results){
+			// 	console.log(results);
+			// })
 
 			$scope.$watch(function(){
 					return self.options.ant_speed
@@ -932,6 +967,16 @@ jbApp.directive('acoSimulator', function(){
 							<p class="card-text">Total ants generated: {{$aco.ants_generated}}</p>
 							<p class="card-text">Total ants lost: {{ $aco.ants_lost }} ({{ (100 * $aco.ants_lost / $aco.ants_generated)|number:1 }} %)</p>
 						</div>
+					</div>
+
+					<div ng-show="$aco.status === 'paused'" class="card">
+						<div class="form-group" ng-init="autoRunCount = 10">
+							<label>Auto Run</label>
+							<input type="number" ng-model="autoRunCount" min="1" class="form-control"/>
+						</div>
+						<button ng-click="$aco.autoRun(autoRunCount)" class="btn btn-primary">
+							<i class="fa fa-play"></i> Auto Run Start
+						</button>
 					</div>
 					
 				</div>
