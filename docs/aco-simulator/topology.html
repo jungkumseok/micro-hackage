@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<base href="/">
+	<meta charset="utf-8">
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	
+	<title> Jungabyte | Jung Kumseok's hackyard </title>
+	<meta name="author" content="Kumseok Jung (jungkumseok)">
+	<meta name="keywords" content="Kumseok, Kumseok Jung, Jung, Computer, Engineering, Software, Hardware, Development, Web, Application, SCADA, HMI, Developer, Engineer, Programmer, Hacker" />
+	<meta name="description" content="Kumseok Jung is a random nerd aspiring to be a full-stack human.">
+	<link rel="shortcut icon" href="assets/favicon.png">
+	<link rel="apple-touch-icon" href="assets/favicon.png">
+	
+	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.3/css/bootstrap.min.css" integrity="sha384-Zug+QiDoJOrZ5t4lssLdxGhVrurbmBWopoEl+M6BdEfwnCJZtKxi1KgxUyJq13dy" crossorigin="anonymous">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" />
+	<link rel="stylesheet" href="/style.css" /> 
+	
+	<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
+	<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.3/js/bootstrap.min.js" integrity="sha384-a5N7Y/aK3qNeh15eJKGWxsqtnX/wWdSZSKp+81YjTmS15nvnvxKHuzaWwXHDli+4" crossorigin="anonymous"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/89/three.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/4.12.2/d3.min.js"></script>
+</head>
+<body>
+<div id="d3view"></div>
+<button id="addNode">
+	Add Node
+</button>
+<button id="removeNode">
+	Remove Node
+</button>
+<script>
+/* model */
+var nodes = [
+	{
+		name: 'A',
+		outgoing: [1, 2]
+	},
+	{
+		name: 'B',
+		outgoing: [2, 0]
+	},
+	{
+		name: 'C',
+		outgoing: [0, 1]
+	}
+];
+
+/* view */
+var size = {
+	width: 600,
+	height: 400
+}
+var svg = d3.select('#d3view')
+            .append('svg');
+                        
+	svg.attr('width', size.width+'px')
+		.attr('height', size.height+'px');
+
+	svg.append('text')
+		.attr('id', 'nodeCount')
+		.attr('x', size.width*4/5)
+		.attr('y', size.height*2/3)
+    	.text('Nodes: '+nodes.length)
+
+function getPosition(index, total, origin, radius){
+	if (!origin) origin = { x: size.width/2, y: size.height/2 };
+	if (!radius) radius = 150;
+	var angle = index * ((2 * Math.PI) / total);
+	return {
+		x: Math.cos(angle) * radius + origin.x,
+		y: Math.sin(angle) * radius + origin.y
+	}
+}
+
+function redraw(){
+	svg.select('#nodeCount')
+		.text('Nodes: '+nodes.length);
+
+	var update = svg.selectAll('g.node')
+					.data(nodes);
+	
+	update.exit().remove();
+
+	var group = update.enter()
+					.append('g')
+					.attr('class', 'node')
+
+		group.append('circle')
+	            .style('fill', 'navy')
+	            .attr('r', 10)
+	            .attr('cx', function(d, i){ return getPosition(i, nodes.length).x; })
+            	.attr('cy', function(d, i){ return getPosition(i, nodes.length).y; })
+        
+        group.append('line')
+        		.attr('class', 'link1')
+        		.attr('x1', function(d, i){ return getPosition(i, nodes.length).x; })
+        		.attr('y1', function(d, i){ return getPosition(i, nodes.length).y; })
+        		.attr('x2', function(d, i){ return getPosition(d.outgoing[0], nodes.length).x; })
+        		.attr('y2', function(d, i){ return getPosition(d.outgoing[0], nodes.length).y; })
+        		.style('stroke', 'black')
+        		.style('stroke-width', 1)
+        group.append('line')
+        		.attr('class', 'link2')
+        		.attr('x1', function(d, i){ return getPosition(i, nodes.length).x; })
+        		.attr('y1', function(d, i){ return getPosition(i, nodes.length).y; })
+        		.attr('x2', function(d, i){ return getPosition(d.outgoing[1], nodes.length).x; })
+        		.attr('y2', function(d, i){ return getPosition(d.outgoing[1], nodes.length).y; })
+        		.style('stroke', 'black')
+        		.style('stroke-width', 1)
+			
+	var merge = update.merge(update)
+       		
+       		merge.select('circle')
+	        	.attr('cx', function(d, i){ return getPosition(i, nodes.length).x; })
+	        	.attr('cy', function(d, i){ return getPosition(i, nodes.length).y; });
+	        merge.select('line.link1')
+	        	.attr('x1', function(d, i){ return getPosition(i, nodes.length).x; })
+        		.attr('y1', function(d, i){ return getPosition(i, nodes.length).y; })
+        		.attr('x2', function(d, i){ return getPosition(d.outgoing[0], nodes.length).x; })
+        		.attr('y2', function(d, i){ return getPosition(d.outgoing[0], nodes.length).y; })
+        	merge.select('line.link2')
+	        	.attr('x1', function(d, i){ return getPosition(i, nodes.length).x; })
+        		.attr('y1', function(d, i){ return getPosition(i, nodes.length).y; })
+        		.attr('x2', function(d, i){ return getPosition(d.outgoing[1], nodes.length).x; })
+        		.attr('y2', function(d, i){ return getPosition(d.outgoing[1], nodes.length).y; })
+
+    
+}   
+
+function addNode(){
+	var newNode = {
+		name: 'R',
+		outgoing: [0, 1]
+	};
+	nodes[nodes.length-2].outgoing[1] = nodes.length;
+	nodes[nodes.length-1].outgoing = [nodes.length, 0];
+	nodes.push(newNode);
+	
+	redraw();
+    // console.log('added Node', nodes);
+}
+
+function removeNode(){
+	if (nodes.length > 2){
+		nodes.pop();
+		nodes[nodes.length-2].outgoing[1] = 0;
+		nodes[nodes.length-1].outgoing = [0, 1];
+
+		redraw();
+		// console.log('removed Nodes', nodes);	
+	}
+}
+
+redraw();
+
+$('#addNode').on('click', addNode);
+$('#removeNode').on('click', removeNode);
+</script>
+</body>
+</html>

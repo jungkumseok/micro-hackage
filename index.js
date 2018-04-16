@@ -6,7 +6,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 
 const SERVICE_PORT = 3000;
-const STATIC_PATH = path.join(__dirname, '/client');
+const STATIC_PATH = path.join(__dirname, '/docs');
 
 /* Create main express app  */
 const app = express();
