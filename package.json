@@ -1,0 +1,16 @@
+{
+  "name": "micro-hackage",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Kumseok Jung <jungkumseok@gmail.com> (https://jungabyte.com)",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^2.3.2",
+    "cookie-parser": "^1.4.3",
+    "express": "^4.16.3"
+  }
+}
