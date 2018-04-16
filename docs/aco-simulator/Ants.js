@@ -5,10 +5,12 @@
 function randInt(min, max){
     return Math.floor(Math.random() * (max - min)) + min;
 }
-function max(arr){
+function max(arr, prop){
+	if (prop) return arr.reduce(function(acc, item){ return item[prop] > acc ? item[prop] : acc }, -Infinity);
 	return arr.reduce(function(acc, item){ return item > acc ? item : acc }, -Infinity);
 }
-function min(arr){
+function min(arr, prop){
+	if (prop) return arr.reduce(function(acc, item){ return item[prop] < acc ? item[prop] : acc }, Infinity);
 	return arr.reduce(function(acc, item){ return item < acc ? item : acc }, Infinity);
 }
 
@@ -81,6 +83,9 @@ function Node(xPos, yPos){
 	this.table = {};
 	this.stats = {};
 
+	// this.data_ants = [];
+	this.data_stats = {};
+
 	this.setUIState('default');
 }
 Node.prototype.radius = 8;
@@ -120,6 +125,12 @@ Node.prototype.initStats = function(dst){
 			best: 0,
 			updated: 0
 		};
+	}
+	if (!(dst.id in this.data_stats)){
+		this.data_stats[dst.id] = {
+			best: 0,
+			times: []
+		}
 	}
 }
 Node.prototype.initTable = function(dst){
@@ -254,13 +265,15 @@ function Ant(src, dst){
 	this.backward_hop = 0;
 
 	// aesthetics
-	this.fillColor = ANT_FORWARD_COLOR;
-	this.radius = ANT_RADIUS;
+	// this.fillColor = ANT_FORWARD_COLOR;
+	// this.radius = ANT_RADIUS;
 }
 Ant.prototype = new EventEmitter();
 Ant.prototype.Speed = 5;
 Ant.prototype.Epsilon = 0;
 Ant.prototype.TTL = 10;
+Ant.prototype.radius = 3;
+Ant.prototype.fillColor = ANT_FORWARD_COLOR;
 Ant.prototype.updateTable = function(node, info){
 	var self = this;
 	if (!info.arrive){
@@ -406,6 +419,104 @@ Ant.prototype.nextFrame = function(context, timestep){
 	context.stroke();
 }
 
+function DataAnt(src, dst){
+	Ant.call(this, src, dst);
+
+}
+DataAnt.prototype = Object.create(Ant.prototype);
+DataAnt.prototype.radius = 3;
+DataAnt.prototype.fillColor = 'rgb(50,50,250)';
+DataAnt.prototype.chooseNextLink = function(timestep){
+	if (this.x === this.prev.x && this.y === this.prev.y){
+		if (this.forward === true){
+			if (this.forward_hop === this.TTL){
+				this.emitOnce('MaxHopReached', this);
+				return;
+			}
+			if (this.memory.length > 0){
+				this.memory[this.memory.length-1].arrive = timestep;
+				// this.memory_persistent[this.memory.length-1].arrive = Date.now();
+			}
+			this.current_link = this.prev.getBestLink(this.dst);
+			this.next = this.current_link.getOtherEnd(this.prev);
+
+			var info = {
+				from: this.prev,
+				link: this.current_link,
+				to: this.next,
+				leave: timestep
+			}
+
+			this.memory.push(info);
+			// this.memory_persistent.push(info);
+			this.forward_hop ++;
+		}
+		else {
+			var info = this.memory.pop();
+			this.current_link = info.link;
+			this.next = info.from;
+			this.backward_hop ++;
+			this.current_info = info;
+		}
+		this.dX = this.Speed * (this.next.x - this.prev.x) / this.current_link.length;
+		this.dY = this.Speed * (this.next.y - this.prev.y) / this.current_link.length;
+		this.sX = Math.sign(this.dX);
+		this.sY = Math.sign(this.dY);
+	}
+	else {
+		throw "Ant is still travelling on a link, cannot choose the next node";
+	}
+}
+DataAnt.prototype.nextFrame = function(context, timestep){
+	var antColor = this.fillColor;
+
+	// If Ant is just starting out, choose a link.
+	if (!(this.next)){
+		this.chooseNextLink(timestep);
+	}
+	// If ant has reached destination, begin backward trip.
+	else if ((this.forward === true) && (this.x === this.dst.x && this.y === this.dst.y)){
+		this.emitOnce('DestinationReached', this);
+		this.forward = false;
+		this.prev = this.next;
+		if (this.memory.length > 0){
+			this.memory[this.memory.length-1].arrive = timestep;
+		}
+		this.chooseNextLink(timestep);
+
+		// this.fillColor = ANT_BACKWARD_COLOR;
+	}
+	else if ((this.forward === false) && (this.x === this.src.x && this.y === this.src.y)){
+		this.emitOnce('SourceReached', this);
+	}
+	// If ant has reached an intermediate link, choose the next link
+	else if (this.x === this.next.x && this.y === this.next.y){
+		this.prev = this.next;
+		this.chooseNextLink(timestep);
+	}
+
+	// Update Ant position
+	//   If ant will reach the next node, set the position to next node
+	if (this.sX * (this.x + this.dX) >= this.sX * this.next.x){
+		this.x = this.next.x;
+		this.y = this.next.y;
+	}
+	else {
+		this.x += this.dX;
+		this.y += this.dY;
+	}
+
+	// Render Ant
+	context.beginPath();
+	context.arc(this.x, this.y, this.radius, 0, 2*Math.PI, false);
+	context.fillStyle = antColor;
+	context.fill();
+	context.lineWidth = 1;
+	context.strokeStyle = '#444';
+	context.stroke();
+}
+
+/** Angular App */
 var jbApp = angular.module('jbApp', ['nvd3']);
 jbApp.directive('acoSimulator', function(){
 	return {
@@ -419,8 +530,8 @@ jbApp.directive('acoSimulator', function(){
 				nodes: 25,
 				// link_density: 0.05,
 				link_per_node: 1,
-				ant_speed: 10,
-				ant_generation: 5000,
+				ant_speed: 20,
+				ant_generation: 3000,
 				ant_epsilon: 0.8,
 				width: 600,
 				height: 400
@@ -432,6 +543,7 @@ jbApp.directive('acoSimulator', function(){
 			var nodes = [];
 			var links = [];
 			var ants = [];
+			var data_ants = [];
 			var antTimer = null;
 			self.mousePos = { x: null, y: null };
 			self.status = 'edit';
@@ -445,6 +557,7 @@ jbApp.directive('acoSimulator', function(){
 			self.dstNode = undefined;
 
 			self.best_path = undefined;
+			self.converged_at = undefined;
 
 			// Init UI stuff
 			var viewport = $('.viewport', $element);
@@ -543,6 +656,8 @@ jbApp.directive('acoSimulator', function(){
 							dst = randInt(0, nodes.length);
 						}
 					}
+
+					nodes[i].initStats(nodes[dst]);	// Initialize Stats table
 					
 					var ant = new Ant(nodes[i], nodes[dst]);
 					ant.id = self.ants_generated;
@@ -568,6 +683,29 @@ jbApp.directive('acoSimulator', function(){
 					ants.push(ant);
 					self.ants_current = ants.length;
 					self.ants_generated ++;
+
+					//Generate Data Ant
+					var data_ant = new DataAnt(nodes[i], nodes[dst]);
+					data_ant.leave = self.timestep;
+					// ant.on('DestinationReached', function(ant){
+					// });
+					data_ant.on('SourceReached', function(ant){
+						var ri = data_ants.findIndex(function(item){ return item === ant; });
+						data_ants.splice(ri, 1);
+						ant.src.data_stats[ant.dst.id].times.push({
+							x: self.timestep,
+							y: (self.timestep - ant.leave)/2
+						});
+						ant.src.data_stats[ant.dst.id].best = min(ant.src.data_stats[ant.dst.id].times, 'y');
+						// console.log("Data Node came back after "+(self.timestep - ant.leave)+' time steps');
+					});
+					data_ant.on('MaxHopReached', function(ant){
+						// console.log('Ant '+ant.id+' has exceeded its TTL. Destroying it.');
+						var ri = data_ants.findIndex(function(item){ return item === ant; });
+						data_ants.splice(ri, 1);
+						// console.log("Data Node died at "+(self.timestep - ant.leave)+' time steps');
+					})
+					data_ants.push(data_ant);
 				}
 			}
 
@@ -598,6 +736,7 @@ jbApp.directive('acoSimulator', function(){
 				nodes = [];
 				links = [];
 				ants = [];
+				data_ants = [];
 				self.mousePos = { x: null, y: null };
 				// self.status = 'paused';
 				self.link_count = 0;
@@ -608,6 +747,8 @@ jbApp.directive('acoSimulator', function(){
 				self.selNode = undefined;
 				self.srcNode = undefined;
 				self.dstNode = undefined;
+
+				self.converged_at = undefined;
 
 				// Randomly Generate Nodes
 				for (var i=0; i < self.options.nodes; i++){
@@ -638,7 +779,10 @@ jbApp.directive('acoSimulator', function(){
 				self.link_count = links.length;
 				Ant.prototype.TTL = 3 * self.link_count;	// Set TTL for ants so that they die if lost in a cycle
 				
-				// generateAnts();
+				// Set Src and Dst right away to measure time
+				self.setSource(nodes[0]);
+				self.setDestination(nodes[nodes.length-1]);
+				self.selNode = nodes[0];
 			}
 
 			function highlightBestPath(){
@@ -654,9 +798,10 @@ jbApp.directive('acoSimulator', function(){
 					var path_length = self.srcNode.highlightBestPath(self.dstNode);
 					if (path_length){
 						self.best_path = path_length;
+						if (!self.converged_at) self.converged_at = self.timestep;	// This works only when we set srcNode and dstNode in the first reset
 					}
 					else {
-						self.best_path = null;
+						self.best_path = undefined;
 					}
 				}
 				links.forEach(function(link){
@@ -675,6 +820,9 @@ jbApp.directive('acoSimulator', function(){
 				highlightBestPath();
 
 				ants.forEach(function(ant){
+					ant.nextFrame(antCtx, self.timestep);
+				})
+				data_ants.forEach(function(ant){
 					ant.nextFrame(antCtx, self.timestep);
 				})
 
@@ -705,6 +853,7 @@ jbApp.directive('acoSimulator', function(){
 				self.status = 'edit';
 				self.timestep = 0;
 				ants = [];
+				data_ants = [];
 				$interval.cancel(antTimer);
 				nextFrame();
 			}
@@ -794,9 +943,9 @@ jbApp.directive('acoSimulator', function(){
 					<div ng-if="$aco.srcNode && $aco.dstNode">
 						<p>From Node #{{ $aco.srcNode.id }} to Node #{{ $aco.dstNode.id }} <small>{{ $aco.srcNode.stats[$aco.dstNode.id].updated }} trips completed</small></p>
 						<p ng-show="$aco.best_path">Best Path Length: {{ $aco.best_path|number:2 }}</p>
+						<p ng-show="$aco.converged_at">Convergence: {{ $aco.converged_at|number:2 }}</p>
 						<trip-graph node="$aco.srcNode" destination="$aco.dstNode"></trip-graph>
-						<p>Best trip time: {{ $aco.srcNode.stats[$aco.dstNode.id].best }}</p>
-						<p>Mean trip time: {{ $aco.srcNode.stats[$aco.dstNode.id].mean | number: 4 }} ± {{ $aco.srcNode.stats[$aco.dstNode.id].confidence | number: 4 }}</p>
+						<p>Best trip time: {{ $aco.srcNode.data_stats[$aco.dstNode.id].best }}</p>
 					</div>
 				</div>
 
@@ -824,7 +973,7 @@ jbApp.directive('acoSimulator', function(){
 							<p>Destination: 
 								<span ng-if="$aco.dstNode">Node #{{ $aco.dstNode.id }} - {{ $aco.selNode.stats[$aco.dstNode.id].updated }} trips</span>
 							</p>
-							<trip-graph node="$aco.selNode" destination="$aco.dstNode" height="140"></trip-graph>
+							<ant-graph node="$aco.selNode" destination="$aco.dstNode" height="140"></ant-graph>
 							<p ng-show="$aco.dstNode">Best trip time: {{ $aco.selNode.stats[$aco.dstNode.id].best }}</p>
 							<p ng-show="$aco.dstNode">Mean trip time: {{ $aco.selNode.stats[$aco.dstNode.id].mean | number: 4 }} ± {{ $aco.selNode.stats[$aco.dstNode.id].confidence | number: 4 }}</p>
 						</div>
@@ -849,7 +998,7 @@ jbApp.directive('acoSimulator', function(){
 		}
 	}
 })
-.directive('tripGraph', function(){
+.directive('antGraph', function(){
 	return {
 		restrict: 'E',
 		scope: {
@@ -860,7 +1009,7 @@ jbApp.directive('acoSimulator', function(){
 		template: '<nvd3 options="$ctrl.graphOptions" data="$ctrl.graphData"></nvd3>',
 		controller: function($scope){
 			var self = this;
-			$scope.node.initStats($scope.destination);	// Make sure stats table is initialized
+			// $scope.node.initStats($scope.destination);	// Make sure stats table is initialized
 			function getData(){
 				return $scope.node.stats[$scope.destination.id].times.map(function(item, index){
 					return { x: index, y: item }
@@ -883,7 +1032,7 @@ jbApp.directive('acoSimulator', function(){
 					duration: 0,
 				}
 			};
-			self.graphData = [{ values: getData(), key: 'Trip time' }];
+			self.graphData = [{ values: [], key: 'Trip time' }];
 
 			$scope.$watch('node', function(node){
 				if (node) node.initStats($scope.destination);
@@ -895,6 +1044,57 @@ jbApp.directive('acoSimulator', function(){
 				return $scope.node.stats[$scope.destination.id].times.length;
 			}, function(length){
 				self.graphData[0].values = getData();
+			});
+		},
+		controllerAs: '$ctrl'
+	}
+})
+.directive('tripGraph', function(){
+	return {
+		restrict: 'E',
+		scope: {
+			node: '=',
+			destination: '=',
+			height: '=?'
+		},
+		template: '<nvd3 options="$ctrl.graphOptions" data="$ctrl.graphData"></nvd3>',
+		controller: function($scope){
+			var self = this;
+			$scope.node.initStats($scope.destination);	// Make sure stats table is initialized
+			// function getData(){
+			// 	return $scope.node.data_stats[$scope.destination.id].times.map(function(item, index){
+			// 		return { x: index, y: item }
+			// 	})
+			// }
+
+			self.graphOptions = {
+				chart: {
+					type: 'lineChart',
+					height: ($scope.height || 200),
+					margin: {
+						top: 25,
+						right: 30,
+						bottom: 30,
+						left: 30
+					},
+					x: function(d){ return d.x },
+					y: function(d){ return d.y },
+					// useInteractiveGuideline: true,
+					duration: 0,
+				}
+			};
+			self.graphData = [{ values: $scope.node.data_stats[$scope.destination.id].times, key: 'Trip time' }];
+
+			$scope.$watch('node', function(node){
+				if (node) node.initStats($scope.destination);
+			})
+			$scope.$watch('destination', function(destination){
+				if (destination) $scope.node.initStats(destination);
+			})
+			$scope.$watch(function(){
+				return $scope.node.data_stats[$scope.destination.id].times.length;
+			}, function(length){
+				self.graphData[0].values = $scope.node.data_stats[$scope.destination.id].times;
 			});
 		},
 		controllerAs: '$ctrl'
