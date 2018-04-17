@@ -13,9 +13,35 @@ function min(arr, prop){
 	if (prop) return arr.reduce(function(acc, item){ return item[prop] < acc ? item[prop] : acc }, Infinity);
 	return arr.reduce(function(acc, item){ return item < acc ? item : acc }, Infinity);
 }
+function analyzeArray(vals, Z){
+	Z = Z || 1.96	// 95% confidence
+	var min = Infinity, max = -Infinity;
+	var mean = vals.reduce(function(acc, item){ 
+		if (item < min) min = item;
+		if (item > max) max = item;
+		return item + acc
+	}, 0) / vals.length;
+	var stdev = Math.sqrt( vals.reduce(function(acc, item){ return acc + Math.pow(item - mean, 2) }, 0) / vals.length );
+	var confidence = Z * stdev / Math.sqrt(vals.length);
+	return {
+		min: min,
+		max: max,
+		mean: mean,
+		stdev: stdev,
+		confidence: confidence
+	}
+}
 
 function mouseInArea(mouseX, mouseY, top, right, bottom, left){
 	return (mouseX > left && mouseY > top && mouseX < right && mouseY < bottom)
+}
+
+function makeCsv(array2d, separator){
+	separator = separator || ','
+	var csv = array2d.map(function(row){ return row.join(separator) }).join('\n');
+	var blob = new Blob([csv], {type:'text/csv'});
+	var url = URL.createObjectURL(blob);
+	return url;
 }
 
 function EventEmitter(){
@@ -326,8 +352,6 @@ Ant.prototype.chooseNextLink = function(timestep){
 				// this.memory_persistent[this.memory.length-1].arrive = Date.now();
 			}
 
-			// var link = this.prev.getBestLink(this.dst);
-			// var next = link.getOtherEnd(this.prev);
 			var rand = Math.random();
 			if (rand < this.Epsilon){
 				this.current_link = this.prev.links[ randInt(0, this.prev.links.length) ];
@@ -518,12 +542,15 @@ DataAnt.prototype.nextFrame = function(context, timestep){
 
 /** Angular App */
 var jbApp = angular.module('jbApp', ['nvd3']);
-jbApp.directive('acoSimulator', function(){
+jbApp.config(['$compileProvider', function($compileProvider){
+	$compileProvider.aHrefSanitizationWhitelist(/^\s*(|blob|):/);
+}])
+.directive('acoSimulator', function(){
 	return {
 		restrict: 'E',
 		scope: {
 		},
-		controller: ['$scope', '$element', '$interval', function($scope, $element, $interval){
+		controller: ['$scope', '$element', '$q', '$interval', '$timeout', function($scope, $element, $q, $interval, $timeout){
 			var self = this;
 
 			self.options = Object.assign({
@@ -532,7 +559,7 @@ jbApp.directive('acoSimulator', function(){
 				link_per_node: 2,
 				ant_speed: 20,
 				ant_generation: 3000,
-				ant_epsilon: 0.8,
+				ant_epsilon: 1.0,
 				width: 600,
 				height: 400
 			}, {});
@@ -546,7 +573,7 @@ jbApp.directive('acoSimulator', function(){
 			var data_ants = [];
 			var antTimer = null;
 			self.mousePos = { x: null, y: null };
-			self.status = 'edit';
+			self.status = 'paused';
 			self.link_count = 0;
 			self.ants_current = ants.length;
 			self.ants_generated = 0;
@@ -845,36 +872,43 @@ jbApp.directive('acoSimulator', function(){
 				self.status = 'running';
 				generateAnts();
 				nextFrame();
-				antTimer = $interval(function(){
-					generateAnts();
-				}, self.options.ant_generation);
+				if (!antTimer){
+					antTimer = $interval(function(){
+						generateAnts();
+					}, self.options.ant_generation);
+				}
 			}
 			self.pause = function(){
+				if (antTimer) $interval.cancel(antTimer);
+				antTimer = null;
 				self.status = 'paused';
-				$interval.cancel(antTimer);
 			}
 			self.editNet = function(){
 				self.status = 'edit';
 				self.timestep = 0;
 				ants = [];
 				data_ants = [];
-				$interval.cancel(antTimer);
+				if (antTimer) $interval.cancel(antTimer);
 				nextFrame();
 			}
 
 			function autoNext(count){
-				if (count <= 0) return Promise.resolve([]);
-				return new Promise(function(resolve, reject){
+				if (count <= 0) return $q.resolve([]);
+				return $q(function(resolve, reject){
+						// self.pause();
 						self.reset();
 						self.onConverge = function(timestep){
+							self.converged_at = undefined;
+							self.onConverge = undefined;
 							self.pause();
-							resolve([timestep]);
-							// setTimeout(function(){
-							// 	resolve([timestep]);
-							// }, 1000);
+							// resolve([timestep]);
+							$timeout(function(){
+								resolve([timestep]);
+							}, 250);
 						}
 						self.resume();
 					}).then(function(result){
+						self.autoRunCount ++;
 						return autoNext(count - 1)
 							.then(function(future_result){
 								return result.concat(future_result);
@@ -883,15 +917,38 @@ jbApp.directive('acoSimulator', function(){
 			}
 
 			self.autoRun = function(count){
-				autoNext(count)
-					.then(function(results){
-						alert(results.join(', '));
+				self.autoRunCount = 0;
+				self.autoRunResults = {
+					config: {
+						nodes: self.options.nodes,
+						link_per_node: self.options.link_per_node,
+						ant_speed: self.options.ant_speed,
+						ant_generation: self.options.ant_generation,
+						ant_epsilon: self.options.ant_epsilon
+					}
+				};
+				return autoNext(count)
+					.then(function(result){
+						console.log("Finished Auto Run - ", self.status, result);
+						self.autoRunResults.result = result;
+						self.autoRunResults.stats = analyzeArray(result);
+						var result_array = result.map(function(val, index){ return [index, val ]});
+						result_array.unshift(
+							Object.keys(self.autoRunResults.config), 
+							Object.values(self.autoRunResults.config),
+							['Mean', self.autoRunResults.stats.mean],
+							['Stdev', self.autoRunResults.stats.stdev],
+							['Confidence', self.autoRunResults.stats.confidence],
+							['Index', 'Converged at']);
+						self.autoRunResults.href = makeCsv(result_array);
+						self.autoRunResults.session = Date.now();
 					})
 			}
 
 			// Begin animation
 			self.reset();
-			self.editNet();
+			self.pause();
+			// self.editNet();
 			// self.resume();
 
 			// self.autoRun(5).then(function(results){
@@ -911,8 +968,8 @@ jbApp.directive('acoSimulator', function(){
 			$scope.$watch(function(){
 				return self.options.ant_generation
 			}, function(val){
-				$interval.cancel(antTimer);
 				if (self.status === 'running'){
+					$interval.cancel(antTimer);
 					antTimer = $interval(function(){
 						generateAnts();
 					}, val);	
@@ -927,16 +984,20 @@ jbApp.directive('acoSimulator', function(){
 					<div class="card">
 						<div class="card-body">
 							<div class="form-group">
+								<label>Nodes</label>
+								<input type="number" ng-model="$aco.options.nodes" class="form-control"/>
+							</div>
+							<div class="form-group">
+								<label>Average Links per Node</label>
+								<input type="number" ng-model="$aco.options.link_per_node" class="form-control"/>
+							</div>
+							<div class="form-group">
 								<label>Ant Speed</label>
 								<input type="number" ng-model="$aco.options.ant_speed" class="form-control"/>
 							</div>
 							<div class="form-group">
 								<label>Ant Generation (ms)</label>
 								<input type="number" ng-model="$aco.options.ant_generation" class="form-control"/>
-							</div>
-							<div class="form-group">
-								<label>Nodes</label>
-								<input type="number" ng-model="$aco.options.nodes" class="form-control"/>
 							</div>
 							<div class="form-group">
 								<label>Exploration (Epsilon)</label>
@@ -969,14 +1030,32 @@ jbApp.directive('acoSimulator', function(){
 						</div>
 					</div>
 
+					<p ng-show="$aco.autoRunCount > 0">Auto Run : {{$aco.autoRunCount}}</p>
 					<div ng-show="$aco.status === 'paused'" class="card">
-						<div class="form-group" ng-init="autoRunCount = 10">
+						<div class="form-group" ng-init="autoRunCount = 500">
 							<label>Auto Run</label>
 							<input type="number" ng-model="autoRunCount" min="1" class="form-control"/>
 						</div>
 						<button ng-click="$aco.autoRun(autoRunCount)" class="btn btn-primary">
 							<i class="fa fa-play"></i> Auto Run Start
 						</button>
+						<div ng-if="$aco.autoRunResults.result" class="card-text">
+							<div style="max-height: 200px; overflow:auto;">
+								<table class="table">
+									<tr>
+										<td>Mean</td>
+										<td>{{$aco.autoRunResults.stats.mean}} ± {{$aco.autoRunResults.stats.confidence}}</td>
+									</tr>
+									<tr ng-repeat="conv in $aco.autoRunResults.result track by $index">
+										<td>{{ $index }}</td>
+										<td>{{ conv }}</td>
+									</tr>
+								</table>
+							</div>
+							<a ng-href="{{$aco.autoRunResults.href}}" download="ACO-result-{{ $aco.autoRunResults.session }}.csv" class="btn btn-success">
+								<i class="fa fa-download"></i> Download CSV
+							</a>
+						</div>
 					</div>
 					
 				</div>
