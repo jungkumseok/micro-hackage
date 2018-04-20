@@ -393,7 +393,7 @@ Ant.prototype.chooseNextLink = function(timestep){
 		throw "Ant is still travelling on a link, cannot choose the next node";
 	}
 }
-Ant.prototype.nextFrame = function(context, timestep){
+Ant.prototype.nextFrame = function(context, timestep, no_render){
 	var antColor = this.fillColor;
 
 	// If Ant is just starting out, choose a link.
@@ -434,13 +434,15 @@ Ant.prototype.nextFrame = function(context, timestep){
 	}
 
 	// Render Ant
-	context.beginPath();
-	context.arc(this.x, this.y, this.radius, 0, 2*Math.PI, false);
-	context.fillStyle = antColor;
-	context.fill();
-	context.lineWidth = 1;
-	context.strokeStyle = '#444';
-	context.stroke();
+	if (!no_render){
+		context.beginPath();
+		context.arc(this.x, this.y, this.radius, 0, 2*Math.PI, false);
+		context.fillStyle = antColor;
+		context.fill();
+		context.lineWidth = 1;
+		context.strokeStyle = '#444';
+		context.stroke();
+	}
 }
 
 function DataAnt(src, dst){
@@ -491,7 +493,7 @@ DataAnt.prototype.chooseNextLink = function(timestep){
 		throw "Ant is still travelling on a link, cannot choose the next node";
 	}
 }
-DataAnt.prototype.nextFrame = function(context, timestep){
+DataAnt.prototype.nextFrame = function(context, timestep, no_render){
 	var antColor = this.fillColor;
 
 	// If Ant is just starting out, choose a link.
@@ -531,13 +533,15 @@ DataAnt.prototype.nextFrame = function(context, timestep){
 	}
 
 	// Render Ant
-	context.beginPath();
-	context.arc(this.x, this.y, this.radius, 0, 2*Math.PI, false);
-	context.fillStyle = antColor;
-	context.fill();
-	context.lineWidth = 1;
-	context.strokeStyle = '#444';
-	context.stroke();
+	if (!no_render){
+		context.beginPath();
+		context.arc(this.x, this.y, this.radius, 0, 2*Math.PI, false);
+		context.fillStyle = antColor;
+		context.fill();
+		context.lineWidth = 1;
+		context.strokeStyle = '#444';
+		context.stroke();
+	}
 }
 
 /** Angular App */
@@ -565,6 +569,10 @@ jbApp.config(['$compileProvider', function($compileProvider){
 			}, {});
 			Ant.prototype.Epsilon = self.options.ant_epsilon;
 			Ant.prototype.Speed = self.options.ant_speed;
+
+			self.view_options = {
+				hide_ants: false,	// faster for auto run
+			}
 
 			// Init objects
 			var nodes = [];
@@ -828,7 +836,7 @@ jbApp.config(['$compileProvider', function($compileProvider){
 						self.best_path = path_length;
 						if (!self.converged_at){
 							self.converged_at = self.timestep;	// This works only when we set srcNode and dstNode in the first reset
-							(self.onConverge && self.onConverge(self.converged_at))
+							(self.onConverge && self.onConverge(self.converged_at, self.ants_generated, self.ants_current, self.ants_lost))
 						}
 					}
 					else {
@@ -851,10 +859,10 @@ jbApp.config(['$compileProvider', function($compileProvider){
 				highlightBestPath();
 
 				ants.forEach(function(ant){
-					ant.nextFrame(antCtx, self.timestep);
+					ant.nextFrame(antCtx, self.timestep, self.view_options.hide_ants);
 				})
 				data_ants.forEach(function(ant){
-					ant.nextFrame(antCtx, self.timestep);
+					ant.nextFrame(antCtx, self.timestep, self.view_options.hide_ants);
 				})
 
 				if (self.status === 'running'){
@@ -897,13 +905,17 @@ jbApp.config(['$compileProvider', function($compileProvider){
 				return $q(function(resolve, reject){
 						// self.pause();
 						self.reset();
-						self.onConverge = function(timestep){
+						self.onConverge = function(timestep, ants_generated, ants_current, ants_lost){
 							self.converged_at = undefined;
 							self.onConverge = undefined;
 							self.pause();
 							// resolve([timestep]);
 							$timeout(function(){
-								resolve([timestep]);
+								resolve([{ 
+									time: timestep, 
+									ants: ants_generated, 
+									ants_alive: ants_current,
+									ants_lost: ants_lost }]);
 							}, 250);
 						}
 						self.resume();
@@ -929,17 +941,24 @@ jbApp.config(['$compileProvider', function($compileProvider){
 				};
 				return autoNext(count)
 					.then(function(result){
-						console.log("Finished Auto Run - ", self.status, result);
+						// console.log("Finished Auto Run - ", self.status, result);
 						self.autoRunResults.result = result;
-						self.autoRunResults.stats = analyzeArray(result);
-						var result_array = result.map(function(val, index){ return [index, val ]});
-						result_array.unshift(
-							Object.keys(self.autoRunResults.config), 
-							Object.values(self.autoRunResults.config),
-							['Mean', self.autoRunResults.stats.mean],
-							['Stdev', self.autoRunResults.stats.stdev],
-							['Confidence', self.autoRunResults.stats.confidence],
-							['Index', 'Converged at']);
+						var stats = {
+							time: analyzeArray(result.map(function(item){ return item.time })),
+							ants: analyzeArray(result.map(function(item){ return item.ants })),
+							ants_alive: analyzeArray(result.map(function(item){ return item.ants_alive })),
+							ants_lost: analyzeArray(result.map(function(item){ return item.ants_lost })),
+						}
+						self.autoRunResults.stats = stats;
+						var summary_array = Object.keys(self.autoRunResults.config).map(function(key){
+							return [key, self.autoRunResults.config[key]]
+						})
+						summary_array.push(['Mean', stats.time.mean, stats.ants.mean, stats.ants_alive.mean, stats.ants_lost.mean],
+							['Stdev', stats.time.stdev, stats.ants.stdev, stats.ants_alive.stdev, stats.ants_lost.stdev],
+							['Confidence', stats.time.confidence, stats.ants.confidence, stats.ants_alive.confidence, stats.ants_lost.confidence],
+							['Index', 'Converged at', 'Total Ants generated', 'Ants alive', 'Ants lost']);
+						var result_array = result.map(function(val, index){ return [index, val.time, val.ants, val.ants_alive, val.ants_lost ]});
+						result_array = summary_array.concat(result_array);
 						self.autoRunResults.href = makeCsv(result_array);
 						self.autoRunResults.session = Date.now();
 					})
@@ -1018,6 +1037,11 @@ jbApp.config(['$compileProvider', function($compileProvider){
 								</button>
 							</div>
 						</div>
+						<div class="card-body">
+							<toggle-button ng-model="$aco.view_options.hide_ants"
+								on-text="Hide Ants (Faster simulation)"
+								off-text="Hide Ants (Faster simulation)"></toggle-button>
+						</div>
 					</div>
 
 					<div class="card">
@@ -1043,12 +1067,19 @@ jbApp.config(['$compileProvider', function($compileProvider){
 							<div style="max-height: 200px; overflow:auto;">
 								<table class="table">
 									<tr>
+										<th>Index</th>
+										<th>Time</th>
+										<th>Ants</th>
+									</tr>
+									<tr>
 										<td>Mean</td>
-										<td>{{$aco.autoRunResults.stats.mean}} ± {{$aco.autoRunResults.stats.confidence}}</td>
+										<td>{{$aco.autoRunResults.stats.time.mean}} ± {{$aco.autoRunResults.stats.time.confidence|number:2}}</td>
+										<td>{{$aco.autoRunResults.stats.ants.mean}} ± {{$aco.autoRunResults.stats.ants.confidence|number:2}}</td>
 									</tr>
 									<tr ng-repeat="conv in $aco.autoRunResults.result track by $index">
 										<td>{{ $index }}</td>
-										<td>{{ conv }}</td>
+										<td>{{ conv.time }}</td>
+										<td>{{ conv.ants }}</td>
 									</tr>
 								</table>
 							</div>
@@ -1224,5 +1255,54 @@ jbApp.config(['$compileProvider', function($compileProvider){
 		controllerAs: '$ctrl'
 	}
 })
+.directive('toggleButton', function(){
+	return {
+		restrict: 'E',
+		scope: {
+			ngModel: '=',
+			onText: '@',
+			offText: '@',
+		},
+		template: '<button ng-show="ngModel" ng-click="ngModel = false" class="btn btn-primary">{{onText}}</button><button ng-hide="ngModel" ng-click="ngModel = true" class="btn">{{offText}}</button>'
+	}
+})
+.directive('helptextViewer', ['$timeout', function($timeout){
+	var HelpText = [
+		'Tweak the parameters on the left',
+		'Generate a new random graph by pressing "Reset"',
+		'Run and Pause the simulation',
+		'Select source and destination by clicking on the nodes',
+		'Once source and destination are set, any intermediate link can be clicked and examined.',
+		'The thickness of the link indicates its "goodness"',
+		'When a path is found, it will be highlighted red',
+		'You can toggle ant animation to speed up the simulation',
+		'Enjoy :)'
+	]
+
+	function nextHelp(elem, index){
+		elem.text(HelpText[index]);
+		// elem.show(500, function(){
+		// 	$timeout(function(){
+		// 		elem.hide(500, function(){
+		// 			nextHelp(elem, (index + 1) % HelpText.length );
+		// 		})
+		// 	}, HelpText[index].length * 100 );
+		// });
+		$timeout(function(){
+			nextHelp(elem, (index + 1) % HelpText.length );
+		}, HelpText[index].length * 100 );
+	}
+
+	return {
+		restrict: 'E',
+		template: '<i class="fa fa-close pull-right"></i>',
+		link: function(scope, elem, attrs, ctrl){
+			var toast = $('<div class="alert alert-info"></div>');
+			elem.append(toast);
+			// toast.text(HelpText[0]);
+			nextHelp(toast, 0);
+		}
+	}
+}])
 
 }())
